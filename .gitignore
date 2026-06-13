@@ -7,13 +7,8 @@ dist/
 build/
 .venv/
 venv/
-*.csv
-*.json
-reports/snapshots.csv
-reports/_summary.json
-reports/regime_state.json
-reports/bottom_fishing.json
-.pytest_cache/
-.coverage
-htmlcov/
 *.log
+reports/
+*.html
+AAPL_equity_report.html
+NVDA_equity_report.html
