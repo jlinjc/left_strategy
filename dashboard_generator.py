@@ -336,72 +336,158 @@ def _table_rows_html(records):
 
 # ─── bottom-fishing (left-side) tab ───────────────────────────────────────────
 
-_BF_TIER_COLOR = {'STRONG': '#1a7a4a', 'SPECULATIVE': '#d4900a',
-                  'KNIFE': '#b52a2a', 'NONE': '#6b7280'}
+_BF_TIER_COLOR = {'STRONG': '#1a7a4a', 'SPECULATIVE': '#d4900a', 'WATCH': '#e67e22',
+                  'UNTRADEABLE': '#6b21a8', 'KNIFE': '#b52a2a', 'NONE': '#6b7280'}
 
-def _bottomfish_html(bf_records, bf_bt):
-    """Build the left-side / bottom-fishing tab body."""
+def _bf_action_card(r):
+    """One executable capitulation card — reads the NEW 投降引擎 schema (tech/quality/crowd/plan)
+    and handles INDEX mode (no stop · no target · hold-forever) plus any missing/None field safely."""
+    s = r.get('score', {}); tech = r.get('tech', {}); pl = r.get('plan', {})
+    q = r.get('quality', {}); cw = s.get('crowd') or r.get('crowd', {})
+    idx = bool(r.get('index_mode'))
+    tier = s.get('tier', 'NONE'); col = s.get('tier_color') or _BF_TIER_COLOR.get(tier, '#6b7280')
+    tk = r.get('ticker', '?'); nm = str(r.get('name', ''))[:26]
+    avg = pl.get('avg_entry'); stop = pl.get('stop')
+    t_relief = pl.get('target_relief'); t_satis = pl.get('target_satisfaction'); rr = pl.get('rr')
+    pos = pl.get('position_pct'); risk = pl.get('dollar_risk'); tstop = pl.get('time_stop_days')
+
+    def _mv(px):   # % move from average entry
+        if px is None or not avg:
+            return ''
+        return f"{(px/avg-1)*100:+.1f}%"
+    def _px(v):    return f"${v}" if v is not None else '—'
+    def _money(v): return f"${v:,.0f}" if isinstance(v, (int, float)) else '—'
+
+    # entry ladder
+    ladder = ''
+    for t in pl.get('tranches', []):
+        pctv = t.get('pct')
+        pcts = f"{pctv:.0f}%" if isinstance(pctv, (int, float)) else '—'
+        ladder += (
+            '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f3f4f6">'
+            f'<div style="flex:1;font-size:8pt;color:#374151">{t.get("label","")}</div>'
+            f'<div style="font-weight:700;color:#0d3b6e;width:66px;text-align:right">${t.get("price")}</div>'
+            f'<div style="font-size:7.8pt;color:#6b7280;width:108px;text-align:right">{t.get("shares")} 股 · {pcts}</div>'
+            '</div>')
+    if not ladder:
+        ladder = '<div style="font-size:8pt;color:#9ca3af">—</div>'
+
+    # context chips — the 5-item capitulation checklist
+    def chip(lbl, val, good=None):
+        c = '#374151'
+        if good is True: c = '#1a7a4a'
+        if good is False: c = '#b52a2a'
+        return (f'<span style="display:inline-block;background:#f1f5f9;border-radius:10px;'
+                f'padding:2px 8px;margin:2px;font-size:7.6pt">{lbl} <strong style="color:{c}">{val}</strong></span>')
+    dd = tech.get('dist_52w_high'); r2 = tech.get('rsi2_min_5d'); cx = tech.get('vol_climax_x')
+    chips = (
+        chip('距高', ('%+.0f%%' % (dd*100)) if dd is not None else '—', (dd if dd is not None else 0) <= -0.15) +
+        chip('RSI2', r2 if r2 is not None else '—', (r2 if r2 is not None else 99) < 5) +
+        chip('量能', f"{cx}x" if cx is not None else '—', (cx or 0) >= 2.0) +
+        chip('轉折', tech.get('turn_kind', '—') if tech.get('the_turn') else '未現', bool(tech.get('the_turn'))) +
+        chip('體質', '免關卡' if idx else q.get('score', '—'), True if idx else (q.get('score') or 0) >= 50)
+    )
+    grade = tech.get('entry_grade', '—')
+
+    # exit column — index = hold forever; stock = stop + targets
+    if idx:
+        exit_html = (
+            '<div style="font-size:8.3pt;line-height:1.85">'
+            '<div><strong style="color:#1a7a4a">不停損</strong> <span style="color:#9ca3af">指數不會歸零·越跌越買</span></div>'
+            '<div><strong style="color:#1a7a4a">不停利</strong> <span style="color:#9ca3af">併入長期核心</span></div>'
+            '<div>持有 <strong>長抱</strong></div></div>')
+        bottom_note = f'▸ {pl.get("action","")};續跌 = 加碼點,不是停損點。'
+        risk_html = ''
+    else:
+        exit_html = (
+            '<div style="font-size:8.3pt;line-height:1.85">'
+            f'<div>停損 <strong style="color:#b52a2a">{_px(stop)}</strong> <span style="color:#9ca3af">({_mv(stop)})</span></div>'
+            f'<div>relief減1/3 <strong style="color:#1a7a4a">{_px(t_relief)}</strong> <span style="color:#9ca3af">({_mv(t_relief)})</span></div>'
+            f'<div>滿足出場 <strong style="color:#1a7a4a">{_px(t_satis)}</strong> <span style="color:#9ca3af">({_mv(t_satis)}, 前高)</span></div>'
+            f'<div>R:R <strong>{rr if rr is not None else "—"}</strong> · 時間停損 <strong>{tstop if tstop is not None else "—"} 日</strong></div></div>')
+        bottom_note = f'▸ 第一批 MOC、其餘掛限價;跌破 {_px(stop)} = 投降失敗,無條件清倉。'
+        risk_html = f' · 風險 <strong style="color:#b52a2a">{_money(risk)}</strong>'
+
+    return f'''
+    <div style="background:white;border-radius:8px;box-shadow:0 1px 5px rgba(0,0,0,.1);
+                border-top:4px solid {col};overflow:hidden">
+      <div style="padding:11px 15px;display:flex;align-items:center;justify-content:space-between;background:#fafbfd">
+        <div><span style="font-size:13pt;font-weight:700;color:#0d3b6e">{tk}</span>
+          <span style="font-size:8pt;color:#6b7280;margin-left:7px">{nm}{' · 指數模式' if idx else ''}</span></div>
+        <div style="text-align:right">
+          <span style="background:{col};color:white;padding:3px 10px;border-radius:4px;font-size:8pt;font-weight:700">{s.get('tier_label','—')}</span>
+          <div style="font-size:7.5pt;color:#6b7280;margin-top:2px">進場級別 <strong style="color:{col}">{grade}</strong></div></div>
+      </div>
+      <div style="padding:12px 15px">
+        <div style="margin-bottom:8px">{chips}</div>
+        <div style="font-size:8pt;color:#374151;background:#f8fafd;padding:7px 10px;border-radius:5px;margin-bottom:10px;line-height:1.5">{s.get('rationale','')}</div>
+
+        <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:14px">
+          <div>
+            <div style="font-size:7.5pt;font-weight:700;color:#1a4d80;text-transform:uppercase;margin-bottom:4px">抄底 / 進場階梯</div>
+            {ladder}
+            <div style="margin-top:6px;font-size:8pt;color:#374151">均價 <strong>${avg}</strong> · 部位 <strong>{pos}%</strong>{risk_html}</div>
+          </div>
+          <div>
+            <div style="font-size:7.5pt;font-weight:700;color:#1a7a4a;text-transform:uppercase;margin-bottom:4px">出場</div>
+            {exit_html}
+          </div>
+        </div>
+        <div style="margin-top:9px;font-size:7.6pt;color:#6b7280;border-top:1px solid #f0f0f0;padding-top:7px">
+          {bottom_note}</div>
+      </div>
+    </div>'''
+
+
+def _bottomfish_html(bf_records, bf_bt, regime=None):
+    """Build the left-side / bottom-fishing tab body — actionable price cards first."""
     if not bf_records:
         return ('<div style="color:#9ca3af;font-size:9pt;padding:30px;text-align:center">'
-                '尚未產生左側抄底資料 — 執行 <code>python bottom_fishing.py AAPL MSFT ...</code></div>')
+                '尚未產生左側抄底資料 — 執行 <code>python daily.py</code></div>')
 
     ok = [r for r in bf_records if r.get('status') == 'OK']
-    order = {'STRONG': 0, 'SPECULATIVE': 1, 'KNIFE': 2, 'NONE': 3}
+    order = {'STRONG': 0, 'SPECULATIVE': 1, 'WATCH': 2, 'UNTRADEABLE': 3, 'KNIFE': 4, 'NONE': 5}
     ok.sort(key=lambda r: (order.get(r.get('score', {}).get('tier'), 9),
                            -(r.get('score', {}).get('conviction') or 0)))
     n_strong = sum(1 for r in ok if r.get('score', {}).get('tier') == 'STRONG')
     n_spec   = sum(1 for r in ok if r.get('score', {}).get('tier') == 'SPECULATIVE')
     n_knife  = sum(1 for r in ok if r.get('score', {}).get('tier') == 'KNIFE')
 
-    # backtest evidence strip
-    bt_html = ''
-    if bf_bt and bf_bt.get('variants'):
-        v = bf_bt['variants']
-        g = v.get('above_200', {})
-        nv = v.get('naive', {})
-        gs = v.get('gated_stopped', {})
-        if g.get('n_trades'):
-            bt_html = (
-                '<div style="background:#f0f7f2;border-left:4px solid #1a7a4a;border-radius:4px;'
-                'padding:10px 16px;margin-bottom:16px;font-size:8.3pt;color:#374151;line-height:1.6">'
-                '<strong>回測證據</strong>（50檔·8年·事件型）：超賣均值回歸有效；加「站上上升200日線」'
-                f'過濾後盈虧比 {nv.get("profit_factor","—")}→<strong>{g.get("profit_factor","—")}</strong>、'
-                f'勝率 {nv.get("win_rate",0)*100:.1f}%→<strong>{g.get("win_rate",0)*100:.1f}%</strong>；'
-                f'加 ATR 硬停損把單筆最深帳面虧損從 <strong style="color:#b52a2a">{nv.get("worst_mae",0)*100:.0f}%</strong>'
-                f' 砍到 <strong style="color:#1a7a4a">{gs.get("worst_mae",0)*100:.0f}%</strong>。'
-                '<a href="bottom_fishing_backtest.html" target="_blank" style="margin-left:8px;color:#1a7a4a">完整回測 →</a></div>')
+    actionable = [r for r in ok if r.get('score', {}).get('tier') in ('STRONG', 'SPECULATIVE')
+                  and r.get('plan', {}).get('tranches')]
+    watch = [r for r in ok if r not in actionable]
 
-    rows = ''
-    for r in ok:
-        s = r.get('score', {}); p = r.get('panel', {}); pl = r.get('plan', {})
-        st = r.get('structure', {}); surv = r.get('survivability', {})
-        tier = s.get('tier', 'NONE'); col = _BF_TIER_COLOR.get(tier, '#6b7280')
-        dist200 = p.get('dist_ma200')
-        avg_entry = pl.get('avg_entry'); stop = pl.get('stop')
-        rows += f'''<tr>
-          <td style="font-weight:700;color:#0d3b6e">{r.get('ticker','?')}</td>
-          <td class="name-cell">{str(r.get('name',''))[:20]}</td>
-          <td><span class="badge" style="background:{col}">{s.get('tier_label','—')}</span></td>
-          <td class="num" style="font-weight:700;color:{col}">{s.get('conviction','—')}</td>
-          <td class="num">{r.get('oversold',{}).get('score','—')}</td>
-          <td class="num">{r.get('capitulation',{}).get('score','—')}</td>
-          <td class="num">{r.get('confirmation',{}).get('score','—')}</td>
-          <td><span class="tag">{st.get('trend','—')}</span></td>
-          <td class="num">{surv.get('survivability','—')}</td>
-          <td class="num">{('%+.1f%%'%(dist200*100)) if dist200 is not None else '—'}</td>
-          <td class="num">{p.get('rsi14') if p.get('rsi14') is not None else '—'}</td>
-          <td class="num">{('$'+str(avg_entry)) if avg_entry else '—'}</td>
-          <td class="num" style="color:#b52a2a">{('$'+str(stop)) if stop else '—'}</td>
-          <td class="num">{(str(pl.get('position_pct'))+'%') if pl.get('position_pct') is not None else '—'}</td>
-        </tr>'''
+    # left-side regime dial (scale into fear)
+    regime_strip = ''
+    if regime:
+        lm = regime.get('left_multiplier')
+        vix = regime.get('vix')
+        above = regime.get('spy_above_200')
+        if lm is not None:
+            if lm > 1.0:
+                tag, tc, bg = f'恐慌加碼 ×{lm:.0%}', '#1a7a4a', '#e8f5e9'
+                msg = f'年線之上 + VIX {vix} 偏高 — 對左側書這是最佳進場窗口,部位已自動放大(研究:高VIX→高預期報酬)。'
+            elif lm < 0.7:
+                tag, tc, bg = f'防禦 ×{lm:.0%}', '#b52a2a', '#fce4ec'
+                msg = f'趨勢已破(SPY<200日線)+ VIX {vix} — 真正的接刀風險區,左側部位自動縮小。'
+            else:
+                tag, tc, bg = f'常規 ×{lm:.0%}', '#d4900a', '#fff8e1'
+                msg = f'VIX {vix} — 常規左側部位。'
+            regime_strip = (
+                f'<div style="background:{bg};border-left:4px solid {tc};border-radius:4px;'
+                f'padding:9px 15px;margin-bottom:14px;font-size:8.3pt;color:#374151">'
+                f'<strong style="color:{tc}">左側部位調節:{tag}</strong> &nbsp; {msg}</div>')
 
     intro = (
         '<div style="background:white;border-radius:6px;padding:12px 16px;margin-bottom:14px;'
         'box-shadow:0 1px 4px rgba(0,0,0,.08);font-size:8.3pt;color:#374151;line-height:1.6">'
-        '<strong>左側 / 抄底引擎：</strong>動能引擎買強勢(右側),這裡買弱勢(左側)。但只在'
-        '<strong>「上升趨勢中的超賣 × 體質健全 × 估值安全邊際 × 止跌確認」</strong>的交集出手，'
-        '以分批進場 + 預設硬停損 + 時間停損 + 反人性紀律執行。完整劇本見 '
-        '<a href="bottom_fishing.html" target="_blank" style="color:#7a1f1f">bottom_fishing.html →</a></div>')
+        '<strong>左側 / 抄底引擎(定位:恐慌中的紀律加碼工具,非選股 alpha 引擎):</strong>'
+        '我們自己的 point-in-time 歸因證明 — 平靜盤的日常抄底對 SPY <strong>沒有顯著 alpha</strong>'
+        '(已被套利),正期望集中在<strong>恐慌(VIX高)與個股自身錯殺</strong>。因此引擎只在'
+        '<strong>「上升趨勢中的極端超賣 × 個股殘差弱 × 體質健全 × 安全邊際 × 恐慌/錯殺情境」</strong>'
+        '才給全倉;平靜盤自動降為觀察/試單,不裝有 edge。第一批 MOC 進場、其餘掛限價分批,'
+        '硬停損(賠率≥1)+ 時間停損 + 組合控管。完整歸因與劇本見 '
+        '<a href="capitulation.html" target="_blank" style="color:#7a1f1f">capitulation.html →</a></div>')
 
     kpis = (
         '<div class="kpi-strip" style="grid-template-columns:repeat(4,1fr)">'
@@ -411,17 +497,57 @@ def _bottomfish_html(bf_records, bf_bt):
         f'<div class="kpi"><div class="lbl">接刀風險(避開)</div><div class="val" style="color:#b52a2a">{n_knife}</div></div>'
         '</div>')
 
-    return f'''{intro}{bt_html}{kpis}
-    <div class="table-card">
-      <div class="table-header"><h2>左側抄底候選排序</h2>
-        <span style="font-size:7.8pt;opacity:.75">點 bottom_fishing.html 看完整分批劇本</span></div>
-      <table><thead><tr>
-        <th>代號</th><th>名稱</th><th>判定</th><th class="num">把握度</th>
-        <th class="num">超賣</th><th class="num">投降</th><th class="num">確認</th>
-        <th>結構</th><th class="num">體質</th><th class="num">vs200dma</th><th class="num">RSI14</th>
-        <th class="num">均價</th><th class="num">停損</th><th class="num">部位</th>
-      </tr></thead><tbody>{rows}</tbody></table>
-    </div>'''
+    # ── actionable cards ──
+    if actionable:
+        cards = ''.join(_bf_action_card(r) for r in actionable)
+        cards_block = (
+            '<div style="font-size:10pt;font-weight:700;color:#0d3b6e;margin:6px 0 10px">'
+            f'今日可執行抄底 — {len(actionable)} 檔 <span style="font-size:7.8pt;color:#9ca3af;font-weight:400">'
+            '(價格、停損、停利、部位皆已算好,可直接掛單)</span></div>'
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:14px;margin-bottom:20px">'
+            f'{cards}</div>')
+    else:
+        cards_block = (
+            '<div style="background:#f8fafd;border:1px dashed #cbd5e1;border-radius:8px;padding:24px;'
+            'text-align:center;color:#6b7280;font-size:8.8pt;margin-bottom:20px">'
+            '目前沒有「可執行」抄底標的 — 沒有標的同時通過結構/體質/超賣/確認關卡。<br>'
+            '<span style="font-size:8pt;color:#9ca3af">左側交易的紀律:沒有交集就不出手,等更深的回檔或恐慌。</span></div>')
+
+    # ── watch / avoid table ──
+    wrows = ''
+    for r in watch:
+        s = r.get('score', {}); tech = r.get('tech', {}); q = r.get('quality', {})
+        cw = s.get('crowd') or r.get('crowd', {})
+        idx = bool(r.get('index_mode'))
+        why = (r.get('plan', {}).get('note') or s.get('rationale', '') or '—')
+        if len(why) > 60: why = why[:60] + '…'
+        tier = s.get('tier', 'NONE'); col = s.get('tier_color') or _BF_TIER_COLOR.get(tier, '#6b7280')
+        dd = tech.get('dist_52w_high'); dist200 = tech.get('dist_ma200')
+        rsi14 = tech.get('rsi14')
+        wrows += f'''<tr>
+          <td style="font-weight:700;color:#0d3b6e">{r.get('ticker','?')}</td>
+          <td class="name-cell">{str(r.get('name',''))[:18]}</td>
+          <td><span class="badge" style="background:{col}">{s.get('tier_label','—')}</span></td>
+          <td class="num" style="font-weight:700;color:{col}">{('%+.0f%%'%(dd*100)) if dd is not None else '—'}</td>
+          <td><span class="tag">{cw.get('phase','—')}</span></td>
+          <td class="num">{'免關卡' if idx else q.get('score','—')}</td>
+          <td class="num">{round(rsi14) if rsi14 is not None else '—'}</td>
+          <td class="num">{('%+.1f%%'%(dist200*100)) if dist200 is not None else '—'}</td>
+          <td style="font-size:7.8pt;color:#6b7280;white-space:normal;max-width:340px">{why}</td>
+        </tr>'''
+    watch_block = ''
+    if wrows:
+        watch_block = (
+            '<div class="table-card">'
+            '<div class="table-header"><h2>觀察 / 避開清單</h2>'
+            '<span style="font-size:7.8pt;opacity:.75">尚未成形或接刀風險 — 附「為什麼還不能抄」</span></div>'
+            '<table><thead><tr>'
+            '<th>代號</th><th>名稱</th><th>判定</th><th class="num">距高</th>'
+            '<th>情緒</th><th class="num">體質</th><th class="num">RSI14</th><th class="num">vs200dma</th>'
+            '<th>為什麼還不能抄</th>'
+            f'</tr></thead><tbody>{wrows}</tbody></table></div>')
+
+    return f'{intro}{regime_strip}{kpis}{cards_block}{watch_block}'
 
 
 # ─── main generator ───────────────────────────────────────────────────────────
@@ -482,7 +608,7 @@ def generate_dashboard(summary_file=None, output_file=None):
     portfolio_html = _portfolio_html(portfolio_data)
     matrix_cells   = _matrix_html(ok)
     bt_stats_html  = _backtest_stats_html(bt_stats)
-    bf_html        = _bottomfish_html(bf_records, bf_backtest)
+    bf_html        = _bottomfish_html(bf_records, bf_backtest, regime_data)
     n_bf_strong    = sum(1 for r in (bf_records or [])
                          if r.get('status') == 'OK'
                          and r.get('score', {}).get('tier') == 'STRONG')
