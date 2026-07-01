@@ -1,0 +1,73 @@
+name: Update Capitulation Dashboard
+
+# ─────────────────────────────────────────────────────────────
+# 自動更新左側抄底儀表板到 GitHub Pages。
+#
+# 時間(UTC · 排程只在 main 分支生效):
+#   美股開盤 09:30 ET。夏令(EDT,UTC-4)/ 冬令(EST,UTC-5)不同,
+#   所以用 12:30–21:30 UTC 每小時各跑一次,涵蓋兩種情況:
+#     • 開盤前約一小時:EDT 08:30 ET=12:30 UTC / EST 08:30 ET=13:30 UTC
+#     • 盤中每小時:一路到收盤 16:00 ET(EDT 20:00 / EST 21:00 UTC)
+#   註:GitHub 排程是「盡力而為」,尖峰時可能延遲數分鐘,屬正常。
+#
+# 也可到 Actions 頁面手動觸發(workflow_dispatch)立即更新。
+# ─────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '30 12-21 * * 1-5'   # 每個工作日 12:30–21:30 UTC,每小時
+  workflow_dispatch:              # 允許手動一鍵觸發
+
+# GitHub Pages 部署所需權限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一時間只跑一個部署,新的取消排隊中的舊的
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install --quiet yfinance pandas numpy requests
+
+      - name: Run capitulation scan (generates reports/capitulation.html)
+        run: python daily.py --no-open --quiet
+        continue-on-error: true    # 個別標的抓不到資料不該讓整個部署失敗
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          if [ -f reports/capitulation.html ]; then
+            cp reports/capitulation.html _site/index.html
+          else
+            echo "<h1>掃描暫時無法產生報告</h1><p>Yahoo 資料源可能暫時限流,下一個排程會重試。</p>" > _site/index.html
+          fi
+          # 附上原始 JSON 供除錯 / 程式讀取
+          [ -f reports/capitulation.json ] && cp reports/capitulation.json _site/capitulation.json || true
+          [ -f reports/daily_digest.json ] && cp reports/daily_digest.json _site/digest.json || true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
