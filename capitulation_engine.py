@@ -646,7 +646,27 @@ def render_report(results, regime=None, portfolio=None, output_path=None):
     n = {k: sum(1 for r in ok if r['score']['tier'] == k) for k in ('STRONG', 'SPECULATIVE', 'WATCH')}
     reg = regime or {}
     vix = reg.get('vix'); lm = reg.get('left_multiplier')
-    cards = ''.join(_card(r) for r in ok)
+
+    # ── 分市場:台股(.TW)vs 美股,各自成一區、各自依判決排序 ──
+    def _is_tw(r): return str(r.get('ticker', '')).upper().endswith('.TW')
+    tw = [r for r in ok if _is_tw(r)]
+    us = [r for r in ok if not _is_tw(r)]
+
+    def _section(title, subset):
+        if not subset:
+            return (f'<div class="mkt">{title} <span>· 名單中無標的</span></div>'
+                    f'<div style="color:#9ca3af;font-size:8.5pt;padding:6px 2px 14px">—</div>')
+        nS = sum(1 for r in subset if r['score']['tier'] == 'STRONG')
+        nSp = sum(1 for r in subset if r['score']['tier'] == 'SPECULATIVE')
+        nW = sum(1 for r in subset if r['score']['tier'] == 'WATCH')
+        act = f' · <b style="color:#7CFC98">真投降 {nS}</b>' if nS else ''
+        spc = f' · 試單 {nSp}' if nSp else ''
+        wat = f' · 等轉折 {nW}' if nW else ''
+        hdr = (f'<div class="mkt">{title} '
+               f'<span>· {len(subset)} 檔{act}{spc}{wat}</span></div>')
+        return hdr + ''.join(_card(r) for r in subset)
+
+    cards = _section('🇺🇸 美股', us) + _section('🇹🇼 台股', tw)
     updated = datetime.now().strftime('%Y-%m-%d %H:%M')
     fast = ' · ⚠快速崩跌:左側加碼關閉' if reg.get('fast_crash') else ''
     lm_pct = (lm if lm is not None else 1)
@@ -660,6 +680,8 @@ body{{font-family:'Segoe UI','Microsoft JhengHei',Arial,sans-serif;font-size:9.5
 .kpi{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}}
 .k{{background:#fff;border-radius:6px;padding:10px 14px;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
 .k .l{{font-size:7pt;color:#6b7280;text-transform:uppercase}}.k .v{{font-size:15pt;font-weight:700;margin-top:2px}}
+.mkt{{background:#0d3b6e;color:#fff;border-radius:6px;padding:9px 16px;margin:22px 0 12px;font-size:11pt;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.12)}}
+.mkt span{{font-size:8.2pt;font-weight:400;opacity:.85}}
 .foot{{text-align:center;font-size:7.3pt;color:#9ca3af;padding:14px}}</style></head><body>
 <div class="bar"><h1>投降引擎 — 反人性左側(乾淨重寫版)</h1>
 <div class="s">只在「真投降 × 量能力竭 × 買方轉折 × 體質撐得住」出手;全市場恐慌(VIX≥{CAPIT_FEAR_VIX:.0f})升全倉;抱到滿足/狂歡,不賣relief。更新:{updated}</div></div>
