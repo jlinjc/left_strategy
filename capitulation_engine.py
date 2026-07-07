@@ -134,6 +134,11 @@ def technical_read(hist_1y, hist_5y) -> dict:
     base = hist_5y if (hist_5y is not None and len(hist_5y) > 260) else hist_1y
     if base is None or base.empty:
         return {}
+    # 台股(.TW)yfinance 常在尾端塞一列「當日未收盤」的 NaN Close,會讓 price=iloc[-1]=NaN,
+    # 連帶距高/RSI/量能全部 NaN(整個台股投降偵測失效)。先去掉 Close 為 NaN 的列再算。
+    base = base[base['Close'].notna()]
+    if base.empty or len(base) < 20:
+        return {}
     close = base['Close']; high = base.get('High', close); low = base.get('Low', close)
     vol = base.get('Volume')
     price = float(close.iloc[-1])
