@@ -30,9 +30,11 @@ from __future__ import annotations
 import os, json, math
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import warnings
 warnings.filterwarnings('ignore')
+
+TAIPEI = timezone(timedelta(hours=8))   # 網站顯示一律用台北時間(CI 跑在 UTC)
 
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), 'reports')
 os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -667,7 +669,8 @@ def render_report(results, regime=None, portfolio=None, output_path=None):
         return hdr + ''.join(_card(r) for r in subset)
 
     cards = _section('🇺🇸 美股', us) + _section('🇹🇼 台股', tw)
-    updated = datetime.now().strftime('%Y-%m-%d %H:%M')
+    updated = datetime.now(TAIPEI).strftime('%Y-%m-%d %H:%M')
+    n_scanned = len(results); n_ok = len(ok); n_us = len(us); n_tw = len(tw)
     fast = ' · ⚠快速崩跌:左側加碼關閉' if reg.get('fast_crash') else ''
     lm_pct = (lm if lm is not None else 1)
     html = f"""<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"/>
@@ -684,7 +687,7 @@ body{{font-family:'Segoe UI','Microsoft JhengHei',Arial,sans-serif;font-size:9.5
 .mkt span{{font-size:8.2pt;font-weight:400;opacity:.85}}
 .foot{{text-align:center;font-size:7.3pt;color:#9ca3af;padding:14px}}</style></head><body>
 <div class="bar"><h1>投降引擎 — 反人性左側(乾淨重寫版)</h1>
-<div class="s">只在「真投降 × 量能力竭 × 買方轉折 × 體質撐得住」出手;全市場恐慌(VIX≥{CAPIT_FEAR_VIX:.0f})升全倉;抱到滿足/狂歡,不賣relief。更新:{updated}</div></div>
+<div class="s">🕐 更新時間 <b>{updated}(台北)</b> · 本次掃描 <b>{n_scanned}</b> 檔全部(美股 {n_us} · 台股 {n_tw})· 成功 {n_ok}</div></div>
 <div class="c">
 <div class="note"><b>誠實定位:</b>這不是打敗大盤的 alpha 引擎(回測證實左側擇時在多頭輸 DCA)。
 它是<b>稀有事件的反人性紀律工具</b> — 在真恐慌時把現金有紀律地投出去、抱到群眾轉貪婪。
